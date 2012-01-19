@@ -3,7 +3,7 @@
 /**
 * Class for quick and easy image manipulation using the GD2 library.
 * @author Daniel Farrelly <daniel@jellystyle.com>
-* @link <http://jellystyle.com>
+* @link <https://github.com/jellybeansoup/JS_Image>
 */
 
 class JS_Image {
