@@ -42,11 +42,11 @@ class JS_Image {
 	*/
 
 	private $_resource = NULL;
-	
+
 	/**
 	* Create a new instance of JS_Image, referencing a given image file.
 	*
-	* ```
+	* ``` php
 	* $image = new JS_Image( '/path/to/image.png' );
 	* ```
 	*
@@ -63,10 +63,38 @@ class JS_Image {
 		self::reset();
 	}
 
+ //
+ // PROPERTIES
+ // Details about the image canvas.
+ //
+	
+	/**
+	* Return the mime type for the current image.
+	* @return bool Flag indicating whether the save was successful.
+	*/
+
+	public function mime() {
+		return $this->_mime;
+	}
+	
+	/**
+	* Fetch an object with the height and with of the current image.
+	* @return bool Flag indicating whether the save was successful.
+	*/
+
+	public function size() {
+		return (object) array( 'width' => $this->_width, 'height' => $this->_height );
+	}
+
+ //
+ // IMAGE OUTPUT
+ // These methods do some extra calulations to make common tasks easier.
+ //
+	
 	/**
 	* Return the content of the manipulated image.
 	*
-	* ```
+	* ``` php
 	* $image = new JS_Image( '/path/to/image.png' );
 	* echo (string) $image;
 	* ```
@@ -86,34 +114,18 @@ class JS_Image {
 		// Output
 	 	return (string) $content;
 	}
-	
-	/**
-	* Return the mime type for the current image.
-	* @return bool Flag indicating whether the save was successful.
-	*/
 
-	public function mime() {
-		return $this->_mime;
-	}
-	
-	/**
-	* Fetch an object with the height and with of the current image.
-	* @return bool Flag indicating whether the save was successful.
-	*/
-
-	public function size() {
-		return (object) array( 'width' => $this->_width, 'height' => $this->_height );
-	}
-	
 	/**
 	* Save the manipulated image.
 	* @param string $path The path to save the image file to. The path must be writable to successfully save the file.
 	*	You can also optionally pass a null value to output the content directly to the browser.
+	* @param bool $interlace Flag indicating whether to save as an interlaced image(true) or not (false). Defaults to false.
+	*	If true, PNG and GIF images are saved as interlaced images, while JPEGs are saved as progressive.
 	* @return bool Flag indicating whether the save was successful (true) or not (false).
 	*	If a path was specified, the path to the new file is returned in place of the true value.
 	*/
 
-	public function save( $path ) {
+	public function save( $path, $interlace=false ) {
 		// If the path doesn't have any slashes...
 		if( $path && strpos( $path, '/' ) === false ) {
 			// Get the path info
@@ -123,6 +135,8 @@ class JS_Image {
 			// Relative to the original file
 			$path = $pathinfo['dirname'].'/'.$path;
 		}
+		// Save as an interlaced GIF/PNG or a progressive JPEG
+		imageinterlace( $this->_resource, $interlace ? 1 : 0 );
 		// PNG source
 		if( $this->_mime == 'image/png' )
 			$status = imagepng( $this->_resource, $path );
@@ -138,6 +152,11 @@ class JS_Image {
 		// Default to returning the status
 		return $status;
 	}
+
+ //
+ // PRIMATIVE METHODS
+ // Basic methods to do basic things.
+ //
 	
 	/**
 	* Adjust the size of the image and canvas.
@@ -196,7 +215,9 @@ class JS_Image {
 
 	public function rotate( $angle ) {
 		// Copy the image to our thumbnail
-		$rotated = imagerotate( $this->_resource, $angle, imagecolorallocatealpha( $this->_resource, 0, 0, 0, 127 ) );
+		$rotated = imagerotate( $this->_resource, $angle, -1 );
+		// Turn off alpha blending
+		imagesavealpha( $rotated, true );
 		// Update the object parameters
 		$this->_resource = $rotated;
 		$this->_width = imagesx( $this->_resource );
@@ -210,14 +231,21 @@ class JS_Image {
 	* @param mixed $path The path to the image file to overlay. Another JS_Image object can also be used.
 	* @param int $x The horizontal offset (from the left) for the overlaid image. Defaults to 0.
 	* @param int $y The vertical offset (from the top) for the overlaid image. Defaults to 0.
+	* @param string $type The layer effect to use in overlaying the image, can be replace, normal or overlay. Defaults to 'normal'.
 	* @return JS_Image The object for chaining.
 	*/
 
-	public function overlay( $path, $x=0, $y=0 ) {
+	public function overlay( $path, $x=0, $y=0, $type='normal' ) {
+		// Layer effect types
+		$types = array( 'replace' => IMG_EFFECT_REPLACE, 'normal' => IMG_EFFECT_NORMAL, 'overlay' => IMG_EFFECT_OVERLAY );
 		// Get the source image as a resource
 		$overlay = self::_fetch_resource( $path );
+		// Change the layer effect
+		imagelayereffect( $this->_resource, $types[$type] );
 		// Copy the overlay into the current canvas
 		imagecopy( $this->_resource, $overlay, $x, $y, 0, 0, imagesx( $overlay ), imagesy( $overlay ) );
+		// Reset the layer effect
+		imagelayereffect( $this->_resource, IMG_EFFECT_NORMAL );
 		// Return the object for chaining
 		return $this;
 	}
@@ -254,6 +282,167 @@ class JS_Image {
 		// Return the object for chaining
 		return $this;
 	}
+
+	/**
+	* Randomly adjust the colour the pixels in the image, given a maximum percentage.
+	* @param float $percent The maximum amount of noise, as a percentage. Defaults to 0.1.
+	* @return JS_Image The object for chaining.
+	*/
+
+    public function noise( $percent=0.1 ) 
+    {
+		// Create a blank canvas in the size we want
+		$canvas = self::_create_canvas( $this->_width, $this->_height );
+    	// Convert the percentage to a value
+    	$amount = ( $percent >= 0 && $percent <= 1 ) ? 255 * $percent : 255 * 0.1;
+		// Iterate through the pixels for the image
+		for( $pixel_x = 0; $pixel_x < $this->_width; $pixel_x++ ) {
+			for( $pixel_y = 0; $pixel_y < $this->_height; $pixel_y++ ) {
+				// Get the colour of the pixel
+				$rgba = imagecolorsforindex( $this->_resource, imagecolorat( $this->_resource, $pixel_x, $pixel_y ) );
+                // Adjust the pixel colour
+				$modifier = rand( 0 - $amount, $amount );
+                $red = self::_clean_color_value( $rgba['red'] + $modifier );
+                $green = self::_clean_color_value( $rgba['green'] + $modifier );
+                $blue = self::_clean_color_value( $rgba['blue'] + $modifier );
+				// Create the new colour resource
+				$new = imagecolorallocatealpha( $this->_resource, $red, $green, $blue, $rgba['alpha'] );
+				// Set the colour of the pixel
+                imagesetpixel( $canvas, $pixel_x, $pixel_y, $new );
+            }
+        }
+		// Destroy the original canvas
+		self::destroy();
+		// Update the object parameters
+		$this->_resource = $canvas;
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Randomly rearrange the pixels for the image, given a maximum distance.
+	* @param int $dist The maximum pixel distance. Defaults to 2.
+	* @return JS_Image The object for chaining.
+	*/
+
+    public function diffuse( $dist=2 ) 
+    {
+		// Create a blank canvas in the size we want
+		$canvas = self::_create_canvas( $this->_width, $this->_height );
+		// Iterate through the pixels for the image
+		for( $pixel_x = 0; $pixel_x < $this->_width; $pixel_x++ ) {
+			for( $pixel_y = 0; $pixel_y < $this->_height; $pixel_y++ ) {
+				// Get a random distance
+                $new_x = $pixel_x + rand( 0 - $dist, $dist );
+                $new_y = $pixel_y + rand( 0 - $dist, $dist );
+    			// If the position of the destination pixel is outside of the canvas
+                if( $new_x >= $this->_width || $new_x < 0 )
+                	$new_x = $pixel_x;
+                if( $new_y >= $this->_height || $new_y < 0 )
+                	$new_y = $pixel_y;
+                // Get the colour for the original pixel and the destination pixel
+ 				$new = imagecolorsforindex( $this->_resource, imagecolorat( $this->_resource, $new_x, $new_y ) );
+				$new = imagecolorallocatealpha( $this->_resource, $new['red'], $new['green'], $new['blue'], $new['alpha'] );
+    			// Swap the two pixels
+                imagesetpixel( $canvas, $pixel_x, $pixel_y, $new );
+            }
+        }
+		// Destroy the original canvas
+		self::destroy();
+		// Update the object parameters
+		$this->_resource = $canvas;
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Shift the colour pallet of the image to a given colour.
+	* This method adjusts the colour pallet using a custom algorithm. For an alternate method,
+	* see JS_Image::colorize_alt, which uses the built-in GD filter.
+	* @param int $red The red value for the desired colour shift. Should be between 0 and 255.
+	* @param int $green The green value for the desired colour shift. Should be between 0 and 255.
+	* @param int $blue The blue value for the desired colour shift. Should be between 0 and 255.
+	* @param float $percent The amount to shift towards the provided colour as a percentage.
+	* @return JS_Image The object for chaining.
+	*/
+
+    public function colorize( $red, $green, $blue, $percent=0.5 ) 
+    {
+		// Create a blank canvas in the size we want
+		$canvas = self::_create_canvas( $this->_width, $this->_height );
+		// Iterate through the pixels for the image
+		for( $pixel_x = 0; $pixel_x < $this->_width; $pixel_x++ ) {
+			for( $pixel_y = 0; $pixel_y < $this->_height; $pixel_y++ ) {
+				// Get the colour of the pixel
+				$rgba = imagecolorsforindex( $this->_resource, imagecolorat( $this->_resource, $pixel_x, $pixel_y ) );
+                // Adjust the pixel colour
+                $lightness = (int) ( $rgba['red'] + $rgba['green'] + $rgba['blue'] ) / 3;
+				$red_diff = $rgba['red'] + ( ( $lightness - $rgba['red'] ) * $percent );
+				$new_red = self::_clean_color_value( $red_diff + ( $red * $percent ) );
+				$green_diff = $rgba['green'] + ( ( $lightness - $rgba['green'] ) * $percent );
+                $new_green = self::_clean_color_value( $green_diff + ( $green * $percent ) );
+				$blue_diff = $rgba['blue'] + ( ( $lightness - $rgba['blue'] ) * $percent );
+                $new_blue = self::_clean_color_value( $blue_diff + ( $blue * $percent ) );
+				// Create the new colour resource
+				$new = imagecolorallocatealpha( $this->_resource, $new_red, $new_green, $new_blue, $rgba['alpha'] );
+				// Set the colour of the pixel
+                imagesetpixel( $canvas, $pixel_x, $pixel_y, $new );
+            }
+        }
+		// Destroy the original canvas
+		self::destroy();
+		// Update the object parameters
+		$this->_resource = $canvas;
+		// Return the object for chaining
+		return $this;
+	}
+
+	/**
+	* Remove colour from the image canvas, effectively converting it to a greyscale image.
+	* @param float $percent The amount of desaturation to be applied to the image as a percentage. Defaults to 1.
+	* @return JS_Image The object for chaining.
+	*/
+
+    public function desaturate( $percent=1 )
+    {
+    	return self::colorize( 0, 0, 0, $percent );
+	}
+
+	/**
+	* Change the opacity of the image so that it appears to be see through.
+	* @param float $percent The percentage of the original opacity.
+	* @return JS_Image The object for chaining.
+	*/
+
+    public function opacity( $percent=1 )
+    {
+		// Create a blank canvas in the size we want
+		$canvas = self::_create_canvas( $this->_width, $this->_height );
+		// Iterate through the pixels for the image
+		for( $pixel_x = 0; $pixel_x < $this->_width; $pixel_x++ ) {
+			for( $pixel_y = 0; $pixel_y < $this->_height; $pixel_y++ ) {
+				// Get the colour of the pixel
+				$rgba = imagecolorsforindex( $this->_resource, imagecolorat( $this->_resource, $pixel_x, $pixel_y ) );
+                // Adjust the alpha
+                $alpha = self::_clean_alpha_value( 127 - ( ( 127 - $rgba['alpha'] ) * $percent ) );
+				// Create the new colour resource
+				$new = imagecolorallocatealpha( $this->_resource, $rgba['red'], $rgba['green'], $rgba['blue'], $alpha );
+				// Set the colour of the pixel
+                imagesetpixel( $canvas, $pixel_x, $pixel_y, $new );
+            }
+        }
+		// Destroy the original canvas
+		self::destroy();
+		// Update the object parameters
+		$this->_resource = $canvas;
+		// Return the object for chaining
+		return $this;
+    }
+
+ //
+ // SMART METHODS
+ // These methods do some extra calulations to make common tasks easier.
+ //
 	
 	/**
 	* Resize image to the percentage of the original size.
@@ -271,7 +460,7 @@ class JS_Image {
 		// Return the object for chaining
 		return $this;
 	}
-	
+
 	/**
 	* Resize the image and canvas so that the image fits within the given dimensions.
 	* i.e. 1024x768 resized to fit 300x300 produces a 300x225 image (and canvas).
@@ -286,9 +475,9 @@ class JS_Image {
 		// Resize to fit the maximum width
 		if( $this->_width > $width )
 			$percent = ( $width / $this->_width );
-		// Resize to fit the maximum height	
-		if( $this->_height > $height )
-			$percent = ( $height / $this->_height );
+		// Resize to fit the maximum height
+		if( ( $this->_height * $percent ) > $height )
+			$percent = ( $height / ( $this->_height * $percent ) );
 		// Resize the image using the percentage
 		if( $percent != 1 )
 			$this->percent( $percent );
@@ -328,18 +517,249 @@ class JS_Image {
 		// Return the object for chaining
 		return $this;
 	}
+
+ //
+ // FILTERS
+ // Run built-in GD filters.
+ //
+
+	/**
+	* Reverses all colors of the image, giving it a negative appearance.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function invert() {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_NEGATE );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Uses mean removal to achieve a "sketchy" effect.
+	* @param int $level Changes the brightness of the image.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function brightness( $level ) {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_BRIGHTNESS, $level );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Changes the contrast of the image.
+	* @param int $level The level of contrast.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function contrast( $level ) {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_CONTRAST, $level );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Shift the colour pallet of the image to a given colour.
+	* This method uses the IMG_FILTER_COLORIZE filter provided by GD and gives a slightly different
+	* result to JS_Image::colorize. For convenience, they are set up to work using the same parameters.
+	* @param int $red The red value for the desired colour shift. Should be between 0 and 255.
+	* @param int $green The green value for the desired colour shift. Should be between 0 and 255.
+	* @param int $blue The blue value for the desired colour shift. Should be between 0 and 255.
+	* @param float $percent The amount to shift towards the provided colour as a percentage.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function colorize_alt( $red, $green, $blue, $percent=0.5 ) {
+        // Adjust the alpha
+        $alpha = self::_clean_alpha_value( 127 - ( 127 * $percent ) );
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_COLORIZE, $red, $green, $blue, $alpha );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Uses edge detection to highlight the edges in the image.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function edge_detect() {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_EDGEDETECT );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Embosses the image.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function emboss() {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_EMBOSS );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Blurs the image using the Gaussian method.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function gaussian_blur() {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_GAUSSIAN_BLUR );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Blurs the image.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function selective_blur() {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_SELECTIVE_BLUR );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Uses mean removal to achieve a "sketchy" effect.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function mean_removal() {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_MEAN_REMOVAL );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Makes the image smoother.
+	* @param int $level The level of smoothness.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function smooth( $level ) {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_SMOOTH, $level );
+		// Return the object for chaining
+		return $this;
+    }
+
+	/**
+	* Applies a pixelation effect to the image.
+	* @param int $size Block size in pixels.
+	* @param bool $advanced Whether to use advanced pixelation effect (true) or not (false). Defaults to false.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function pixelate( $size, $advanced=false ) {
+		// Run the filter
+		imagefilter( $this->_resource, IMG_FILTER_PIXELATE, $size, $advanced );
+		// Return the object for chaining
+		return $this;
+    }
+
+ //
+ // CANVAS
+ // Manipulate the internal canvas.
+ //
 	
+	/**
+	* Reduce the palette of the image canvas. This is a slightly quicker method than JS_Image::adaptive.
+	* @param int $colors The maximum number of colours to allow in the canvas.
+	* @param bool $dithering Flag indicating whether to dither the image (true) or not (false). Defaults to true.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function palette( $colors, $dithering=true ) {
+        // Set the colour palette for the current canvas
+        imagetruecolortopalette( $this->_resource, $dithering, $colors );
+		// Return the object for chaining
+		return $this;
+	}
+
+	/**
+	* Reduce the palette of the image canvas, matching the resulting colours as closely to the original palette
+	* as possible. This produces a more accurate (and better looking) image that JS_Image::palette.
+	* @param int $colors The maximum number of colours to allow in the canvas.
+	* @param bool $dithering Flag indicating whether to dither the image (true) or not (false). Defaults to true.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function adaptive( $colors, $dithering=true ) {
+		// Duplicate the current canvas
+		$canvas = self::_create_canvas( $this->_width, $this->_height );
+	    imagecopymerge( $canvas, $this->_resource, 0, 0, 0, 0, $this->_width, $this->_height, 100 );
+	    // Reduce the palette of the image
+	    imagetruecolortopalette( $this->_resource, $dithering, $colors );
+	    // Match the resulting colours to the duplicated image.
+	    imagecolormatch( $canvas, $this->_resource );
+	    // And then destroy the duplicate
+	    imagedestroy( $canvas );
+		// Return the object for chaining
+		return $this;
+	}
+
+	/**
+	* Reduce the palette of the image canvas.
+	* @param int $red The red value for the desired background colour. Should be between 0 and 255.
+	* @param int $green The green value for the desired background colour. Should be between 0 and 255.
+	* @param int $blue The blue value for the desired background colour. Should be between 0 and 255.
+	* @param float $alpha The $alpha value for the desired background colour as a percentage.
+	* @return JS_Image The object for chaining.
+	*/
+
+	public function background( $red, $green, $blue, $alpha=1 ) {
+        // Clean the values
+        $red = self::_clean_color_value( $red );
+        $green = self::_clean_color_value( $green );
+        $blue = self::_clean_color_value( $blue );
+        $alpha = self::_clean_alpha_value( 127 - ( 127 * $alpha ) );
+		// Create a blank canvas in the size we want
+		$canvas = self::_create_canvas( $this->_width, $this->_height );
+		// Create the new colour resource
+		$rgba = imagecolorallocatealpha( $this->_resource, $red, $green, $blue, $alpha );
+		// Set the background color as transparent
+		imagefill( $canvas, 0, 0, $rgba );
+		// Copy the image to our thumbnail
+		imagecopyresampled( $canvas, $this->_resource, 0, 0, 0, 0, $this->_width, $this->_height, $this->_width, $this->_height );
+		// Destroy the original canvas
+		self::destroy();
+		// Update the object parameters
+		$this->_resource = $canvas;
+		// Return the object for chaining
+		return $this;
+	}
+
 	/**
 	* Reset the image canvas to the original.
 	* @return JS_Image The object for chaining.
 	*/
 
 	public function reset() {
-		// Get the image size
-		$image_size = getimagesize( $this->_path );
-		$this->_width = $image_size[0];
-		$this->_height = $image_size[1];
-		$this->_mime = $image_size['mime'];
+		// If we're dealing with an JS_Image object
+		if( is_a( $this->_path, 'JS_Image' ) ) {
+			$image_size = $this->_path->size();
+			$this->_width = $image_size->width;
+			$this->_height = $image_size->height;
+			$this->_mime = $this->_path->mime();
+		}
+		// If we have an existing path
+		elseif( file_exists( $this->_path ) ) {
+			$image_size = getimagesize( $this->_path );
+			$this->_width = $image_size[0];
+			$this->_height = $image_size[1];
+			$this->_mime = $image_size['mime'];
+		}
 		// Destroy the original canvas (if one exists)
 		self::destroy();
 		// Get the source image as a resource
@@ -365,6 +785,11 @@ class JS_Image {
 		return $this;
 	}
 
+ //
+ // PRIVATE METHODS
+ // Useful methods that shouldn't be called directly.
+ //
+	
 	/**
 	* Create a canvas in the size given.
 	* @param int $width The width for the new canvas.
@@ -377,7 +802,7 @@ class JS_Image {
 		$canvas = imagecreatetruecolor( $width, $height );
 		// Turn off alpha blending
 		imagesavealpha( $canvas, true );
-		// Set the background color to white
+		// Set the background color as transparent
 		imagefill( $canvas, 0, 0, imagecolorallocatealpha( $canvas, 0, 0, 0, 127 ) );
 		// Return the new canvas
 		return $canvas;
@@ -400,6 +825,42 @@ class JS_Image {
 		}
 		// Default to null
 		return null;
+	}
+	
+	/**
+	* Cleans the given integer value to a value that can be used as a colour value.
+	* The output will be a round number between 0 and 255.
+	* @param int $value The value to be cleaned.
+	* @returns int The cleaned value.
+	*/
+
+	private function _clean_color_value( $value ) {
+		// Max out the value
+		if( $value > 255 )
+			return 255;
+		// Min value
+		if( $value < 0 )
+			return 0;
+		// Return a round number
+		return (int) round( $value );
+	}
+	
+	/**
+	* Cleans the given integer value to a value that can be used as an alpha value.
+	* The output will be a round number between 0 and 127.
+	* @param int $value The value to be cleaned.
+	* @returns int The cleaned value.
+	*/
+
+	private function _clean_alpha_value( $value ) {
+		// Max out the value
+		if( $value > 127 )
+			return 127;
+		// Min value
+		if( $value < 0 )
+			return 0;
+		// Return a round number
+		return (int) round( $value );
 	}
 	
 }
